@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>國字進度追蹤系統</title>
+<style>
+  body{font-family:system-ui,-apple-system,"Noto Sans TC",sans-serif; margin:16px; background-color: #f0f2f5; -webkit-user-select:none;}
+  .card{border:1px solid #ddd; border-radius:15px; padding:20px; margin:12px auto; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 600px;}
+  .big{font-size:32px; font-weight:700; color: #1a73e8;}
+  #canvas{border:2px solid #333; touch-action:none; border-radius:10px; background:#fff; width: 100%; max-width: 450px; aspect-ratio: 1/1;}
+  .row{display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content: center;}
+  button{padding:12px 18px; border-radius: 10px; border: 1px solid #ccc; cursor:pointer; font-size:18px; background: white;}
+  #startBtn{background-color: #1a73e8; color: white; border: none; width: 100%; padding: 20px; font-size: 24px; font-weight: bold;}
+  .progress-container { width: 100%; background-color: #e0e0e0; border-radius: 20px; margin: 10px 0; height: 15px; overflow: hidden; }
+  .progress-bar { height: 100%; background-color: #34a853; width: 0%; transition: width 0.5s; }
+  #clueSentence{font-size:22px; margin:20px 0; min-height:1.2em; border-left: 4px solid #1a73e8; padding-left: 10px;}
+  .muted{color:#666; font-size: 14px; text-align: center;}
+</style>
+</head>
+<body>
+
+<div id="setupCard" class="card">
+  <h2 style="text-align:center;">國字書寫進度系統</h2>
+  
+  <div style="margin-bottom: 20px;">
+    <label>學生姓名：</label>
+    <input id="studentName" placeholder="輸入姓名載入進度" oninput="updateUIByStudent()" style="width:100%; padding:15px; box-sizing:border-box; border-radius:8px; border:1px solid #ccc; font-size:20px;"/>
+  </div>
+
+  <div id="progressSection" style="margin: 15px 0; display:none;">
+    <div style="display:flex; justify-content:space-between; font-size:14px;">
+      <span id="displayName">學生</span> 的挑戰進度
+      <span id="progressText">0 / 2500</span>
+    </div>
+    <div class="progress-container"><div id="progressBar" class="progress-bar"></div></div>
+  </div>
+
+  <div style="margin-bottom: 20px;">
+    <label>測驗題數：</label>
+    <select id="countSel" style="padding:10px; font-size:18px;">
+      <option value="10">10 題</option>
+      <option value="20">20 題</option>
+      <option value="30" selected>30 題</option>
+    </select>
+  </div>
+  
+  <button id="startBtn">啟動測驗</button>
+</div>
+
+<div id="examArea" style="display:none;">
+  <div class="card">
+    <div style="display:flex; justify-content:space-between;">
+      <div>
+        <div class="muted">第 <span id="qIndex">0</span> / <span id="qTotal">0</span> 題</div>
+        <div class="big" id="clueWord"></div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <button id="btnRepeatWord" style="background:#fff4e5;">🔊 念題目</button>
+        <button id="btnRepeatSentence">🗣 念句子</button>
+      </div>
+    </div>
+    <div id="clueSentence"></div>
+    <div style="text-align: center;"><canvas id="canvas" width="500" height="500"></canvas></div>
+    <div class="row" style="margin-top:20px;">
+      <button onclick="clearCanvas()" style="flex:1;">重寫</button>
+      <button id="submitBtn" style="flex:2; background:#34a853; color:white; border:none; font-weight:bold; font-size:22px;">送出答案</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// --- 題庫區域：目前包含 1-200 字頻 ---
+const BANK = [
+  {"word":"的","clueWordFull":"好的","clueSentenceFull":"這是一個好的開始。"},
+  {"word":"一","clueWordFull":"一個","clueSentenceFull":"我有這一個好主意。"},
+  {"word":"是","clueWordFull":"但是","clueSentenceFull":"雖然很累，但是很開心。"},
+  {"word":"了","clueWordFull":"除了","clueSentenceFull":"除了跑步，我也喜歡游泳。"},
+  {"word":"不","clueWordFull":"不要","clueSentenceFull":"請不要在走廊跑步。"},
+  {"word":"我","clueWordFull":"我們","clueSentenceFull":"我們是一輩子的好朋友。"},
+  {"word":"有","clueWordFull":"有趣","clueSentenceFull":"這本故事書內容非常有趣。"},
+  {"word":"在","clueWordFull":"正在","clueSentenceFull":"姐姐正在客廳練習彈鋼琴。"},
+  {"word":"人","clueWordFull":"大人","clueSentenceFull":"大人要給小朋友好榜樣。"},
+  {"word":"來","clueWordFull":"回來","clueSentenceFull":"爸爸每天準時下班回來。"},
+  {"word":"大","clueWordFull":"大家","clueSentenceFull":"大家一起動手打掃教室。"},
+  {"word":"上","clueWordFull":"早上","clueSentenceFull":"早上起床要記得刷牙洗臉。"},
+  {"word":"這","clueWordFull":"這次","clueSentenceFull":"這次測驗我會好好努力。"},
+  {"word":"到","clueWordFull":"到達","clueSentenceFull":"我們終於到達了山頂。"},
+  {"word":"們","clueWordFull":"他們","clueSentenceFull":"他們正在草地上踢足球。"},
+  {"word":"個","clueWordFull":"每個","clueSentenceFull":"每個同學都有自己的優點。"},
+  {"word":"小","clueWordFull":"小心","clueSentenceFull":"走樓梯要小心，不要推擠。"},
+  {"word":"你","clueWordFull":"你好","clueSentenceFull":"見到老師要說聲你好。"},
+  {"word":"子","clueWordFull":"肚子","clueSentenceFull":"我現在肚子覺得有點餓。"},
+  {"word":"他","clueWordFull":"他的","clueSentenceFull":"他的書包裡裝滿了課本。"},
+  {"word":"以","clueWordFull":"以後","clueSentenceFull":"以後我要當一名科學家。"},
+  {"word":"好","clueWordFull":"好看","clueSentenceFull":"這部電影真的很好看。"},
+  {"word":"為","clueWordFull":"為了","clueSentenceFull":"為了健康，我們要多吃蔬菜。"},
+  {"word":"就","clueWordFull":"成就","clueSentenceFull":"這件事讓他很有成就感。"},
+  {"word":"生","clueWordFull":"生日","clueSentenceFull":"下個星期是我的生日。"},
+  {"word":"要","clueWordFull":"要求","clueSentenceFull":"老師對作業的要求很嚴格。"},
+  {"word":"說","clueWordFull":"說話","clueSentenceFull":"在圖書館說話要輕聲細語。"},
+  {"word":"中","clueWordFull":"中心","clueSentenceFull":"學校是學習的中心。"},
+  {"word":"天","clueWordFull":"天氣","clueSentenceFull":"今天的天氣非常晴朗。"},
+  {"word":"和","clueWordFull":"和平","clueSentenceFull":"世界和平是大家的願望。"},
+  {"word":"時","clueWordFull":"時間","clueSentenceFull":"我們要好好珍惜時間。"},
+  {"word":"可","clueWordFull":"可愛","clueSentenceFull":"那隻小貓長得很可愛。"},
+  {"word":"麼","clueWordFull":"什麼","clueSentenceFull":"你今天早餐吃了什麼？"},
+  {"word":"看","clueWordFull":"看到","clueSentenceFull":"我看到草地上有一隻蝴蝶。"},
+  {"word":"會","clueWordFull":"學會","clueSentenceFull":"我終於學會騎腳踏車了。"},
+  {"word":"地","clueWordFull":"地方","clueSentenceFull":"這裡是一個運動的好地方。"},
+  {"word":"家","clueWordFull":"家庭","clueSentenceFull":"美滿的家庭需要共同維護。"},
+  {"word":"下","clueWordFull":"下次","clueSentenceFull":"下次我們再一起去公園。"},
+  {"word":"出","clueWordFull":"出生","clueSentenceFull":"他在一個溫暖的春天出生。"},
+  {"word":"學","clueWordFull":"學習","clueSentenceFull":"學習新知識是一件快樂的事。"},
+  {"word":"著","clueWordFull":"看著","clueSentenceFull":"妹妹看著遠方的飛機。"},
+  {"word":"國","clueWordFull":"國家","clueSentenceFull":"我們生長在一個美麗的國家。"},
+  {"word":"得","clueWordFull":"得到","clueSentenceFull":"他因為努力而得到獎勵。"},
+  {"word":"也","clueWordFull":"也許","clueSentenceFull":"也許明天就會出太陽了。"},
+  {"word":"用","clueWordFull":"用心","clueSentenceFull":"寫作業要用心才能進步。"},
+  {"word":"多","clueWordFull":"多多","clueSentenceFull":"我們要多多幫忙做家事。"},
+  {"word":"成","clueWordFull":"成長","clueSentenceFull":"每個人都在不斷的成長。"},
+  {"word":"年","clueWordFull":"今年","clueSentenceFull":"今年我已經升上三年級了。"},
+  {"word":"裡","clueWordFull":"裡面","clueSentenceFull":"盒子裡面裝著我的玩具。"},
+  {"word":"過","clueWordFull":"過去","clueSentenceFull":"過去的事情就讓它過去吧。"},
+  {"word":"能","clueWordFull":"能力","clueSentenceFull":"他有解決問題的能力。"},
+  {"word":"後","clueWordFull":"以後","clueSentenceFull":"以後我要更加努力。"},
+  {"word":"長","clueWordFull":"長大","clueSentenceFull":"我長大以後想當一名醫生。"},
+  {"word":"都","clueWordFull":"都市","clueSentenceFull":"都市裡到處都是高樓大廈。"},
+  {"word":"分","clueWordFull":"分享","clueSentenceFull":"分享快樂會讓快樂加倍。"},
+  {"word":"很","clueWordFull":"很好","clueSentenceFull":"這是一個很好的建議。"},
+  {"word":"老","clueWordFull":"老師","clueSentenceFull":"老師教導我們許多知識。"},
+  {"word":"動","clueWordFull":"動物","clueSentenceFull":"我們應該愛護小動物。"},
+  {"word":"起","clueWordFull":"起床","clueSentenceFull":"每天早起身體好。"},
+  {"word":"物","clueWordFull":"物品","clueSentenceFull":"文具是學習的必備物品。"},
+  {"word":"公","clueWordFull":"公園","clueSentenceFull":"週末全家一起去公園散步。"},
+  {"word":"水","clueWordFull":"水果","clueSentenceFull":"多吃水果對身體很好。"},
+  {"word":"什","clueWordFull":"什麼","clueSentenceFull":"你最喜歡什麼顏色？"},
+  {"word":"心","clueWordFull":"心情","clueSentenceFull":"今天我的心情特別愉快。"},
+  {"word":"把","clueWordFull":"把握","clueSentenceFull":"我們要把握學習的機會。"},
+  {"word":"面","clueWordFull":"面對","clueSentenceFull":"勇敢面對所有的挑戰。"},
+  {"word":"作","clueWordFull":"作品","clueSentenceFull":"這件作品花了我很多心思。"},
+  {"word":"方","clueWordFull":"方便","clueSentenceFull":"捷運讓我們的生活很方便。"},
+  {"word":"那","clueWordFull":"那邊","clueSentenceFull":"那邊有一棵高大的樹。"},
+  {"word":"十","clueWordFull":"十分","clueSentenceFull":"他對這次比賽信心十分。"},
+  {"word":"想","clueWordFull":"想法","clueSentenceFull":"每個人都可以表達自己的想法。"},
+  {"word":"樣","clueWordFull":"樣子","clueSentenceFull":"這朵花的樣子很特別。"},
+  {"word":"自","clueWordFull":"自由","clueSentenceFull":"鳥兒在空中自由的飛翔。"},
+  {"word":"所","clueWordFull":"所以","clueSentenceFull":"因為下雨，所以我不出門。"},
+  {"word":"然","clueWordFull":"雖然","clueSentenceFull":"雖然下雨，我們還是去上學。"},
+  {"word":"如","clueWordFull":"如果","clueSentenceFull":"如果明天放假，我想去玩。"},
+  {"word":"三","clueWordFull":"三心","clueSentenceFull":"做事不能三心二意。"},
+  {"word":"發","clueWordFull":"發生","clueSentenceFull":"這裡剛才發生了什麼事？"},
+  {"word":"事","clueWordFull":"事情","clueSentenceFull":"今天有很多事情要處理。"},
+  {"word":"對","clueWordFull":"對話","clueSentenceFull":"這段對話非常精彩。"},
+  {"word":"沒","clueWordFull":"沒有","clueSentenceFull":"教室裡現在沒有人。"},
+  {"word":"還","clueWordFull":"還是","clueSentenceFull":"你還是決定要去參加嗎？"},
+  {"word":"同","clueWordFull":"同學","clueSentenceFull":"同學之間要相親相愛。"},
+  {"word":"高","clueWordFull":"高興","clueSentenceFull":"見到老朋友真令人高興。"},
+  {"word":"道","clueWordFull":"知道","clueSentenceFull":"你知道圖書館在哪裡嗎？"},
+  {"word":"師","clueWordFull":"師生","clueSentenceFull":"校園裡師生關係很融洽。"},
+  {"word":"氣","clueWordFull":"天氣","clueSentenceFull":"最近的天氣變化很大。"},
+  {"word":"種","clueWordFull":"種類","clueSentenceFull":"這間商店有各種種類的玩具。"},
+  {"word":"而","clueWordFull":"而且","clueSentenceFull":"他不但聰明，而且很努力。"},
+  {"word":"回","clueWordFull":"回答","clueSentenceFull":"請舉手回答老師的問題。"},
+  {"word":"二","clueWordFull":"二月","clueSentenceFull":"二月通常是過年的時候。"},
+  {"word":"開","clueWordFull":"開心","clueSentenceFull":"今天出去玩，大家都很開心。"},
+  {"word":"於","clueWordFull":"關於","clueSentenceFull":"關於這件事，我有不同意見。"},
+  {"word":"頭","clueWordFull":"頭髮","clueSentenceFull":"姐姐剪了一頭短髮。"},
+  {"word":"現","clueWordFull":"現在","clueSentenceFull":"現在是休息時間。"},
+  {"word":"做","clueWordFull":"做事","clueSentenceFull":"做事要負責到底。"},
+  {"word":"文","clueWordFull":"文字","clueSentenceFull":"文字是記錄歷史的工具。"},
+  {"word":"媽","clueWordFull":"媽媽","clueSentenceFull":"媽媽辛苦的工作養育我。"},
+  {"word":"體","clueWordFull":"身體","clueSentenceFull":"我們要好好保重身體。"},
+  {"word":"些","clueWordFull":"這些","clueSentenceFull":"這些書都是我要借的。"},
+  {"word":"最","clueWordFull":"最好","clueSentenceFull":"你是我最好的朋友。"},
+  {"word":"寫","clueWordFull":"寫字","clueSentenceFull":"弟弟每天練習寫字。"},
+  {"word":"又","clueWordFull":"又是","clueSentenceFull":"今天又是充滿希望的一天。"},
+  {"word":"因","clueWordFull":"因為","clueSentenceFull":"因為努力，他考了滿分。"},
+  {"word":"前","clueWordFull":"前面","clueSentenceFull":"學校前面有一條小河流。"},
+  {"word":"從","clueWordFull":"從前","clueSentenceFull":"從前有一個美麗的傳說。"},
+  {"word":"法","clueWordFull":"方法","clueSentenceFull":"總會找到解決的方法。"},
+  {"word":"明","clueWordFull":"明天","clueSentenceFull":"明天我們要去參觀動物園。"},
+  {"word":"行","clueWordFull":"行為","clueSentenceFull":"我們要對自己的行為負責。"},
+  {"word":"問","clueWordFull":"問題","clueSentenceFull":"有問題可以隨時發問。"},
+  {"word":"意","clueWordFull":"意見","clueSentenceFull":"大家都在表達自己的意見。"},
+  {"word":"花","clueWordFull":"花朵","clueSentenceFull":"花園裡開滿了五顏六色的花朵。"},
+  {"word":"日","clueWordFull":"節日","clueSentenceFull":"過年是華人最重要的節日。"},
+  {"word":"形","clueWordFull":"形狀","clueSentenceFull":"雲朵會變幻出各種形狀。"},
+  {"word":"知","clueWordFull":"知識","clueSentenceFull":"讀書可以增加我們的知識。"},
+  {"word":"四","clueWordFull":"四周","clueSentenceFull":"教室四周佈置得很漂亮。"},
+  {"word":"快","clueWordFull":"快樂","clueSentenceFull":"祝你生日快樂。"},
+  {"word":"之","clueWordFull":"百分之","clueSentenceFull":"他有百分之百的把握。"},
+  {"word":"常","clueWordFull":"經常","clueSentenceFull":"他經常去圖書館借書。"},
+  {"word":"經","clueWordFull":"經驗","clueSentenceFull":"失敗也是一種寶貴的經驗。"},
+  {"word":"教","clueWordFull":"教室","clueSentenceFull":"同學們正在教室裡讀書。"},
+  {"word":"活","clueWordFull":"活動","clueSentenceFull":"這場體育活動非常精彩。"},
+  {"word":"太","clueWordFull":"太陽","clueSentenceFull":"太陽從東方升起來了。"},
+  {"word":"兩","clueWordFull":"兩邊","clueSentenceFull":"道路兩邊種滿了路樹。"},
+  {"word":"果","clueWordFull":"如果","clueSentenceFull":"如果明天天晴，我們去遠足。"},
+  {"word":"本","clueWordFull":"本子","clueSentenceFull":"這是我的作業本子。"},
+  {"word":"兒","clueWordFull":"兒子","clueSentenceFull":"他是王先生的小兒子。"},
+  {"word":"點","clueWordFull":"點心","clueSentenceFull":"下午茶時間有美味的點心。"},
+  {"word":"當","clueWordFull":"當時","clueSentenceFull":"當時我不在現場。"},
+  {"word":"美","clueWordFull":"美麗","clueSentenceFull":"這裡的風景真美麗。"},
+  {"word":"校","clueWordFull":"校園","clueSentenceFull":"校園裡到處都是歡笑聲。"},
+  {"word":"進","clueWordFull":"進步","clueSentenceFull":"他在數學方面進步很大。"},
+  {"word":"等","clueWordFull":"等待","clueSentenceFull":"耐心等待果實成熟。"},
+  {"word":"但","clueWordFull":"但是","clueSentenceFull":"他雖然很忙，但是很有禮貌。"},
+  {"word":"樂","clueWordFull":"快樂","clueSentenceFull":"我們全家過著快樂的生活。"},
+  {"word":"部","clueWordFull":"部分","clueSentenceFull":"這只是故事的一小部分。"},
+  {"word":"再","clueWordFull":"再見","clueSentenceFull":"放學時要跟老師說再見。"},
+  {"word":"數","clueWordFull":"數學","clueSentenceFull":"數學是一門有趣的學問。"},
+  {"word":"像","clueWordFull":"好像","clueSentenceFull":"他長得好像他的爸爸。"},
+  {"word":"只","clueWordFull":"只有","clueSentenceFull":"森林裡只有幾隻小鳥。"},
+  {"word":"力","clueWordFull":"努力","clueSentenceFull":"只要努力就會有收穫。"},
+  {"word":"色","clueWordFull":"顏色","clueSentenceFull":"你最喜歡哪一種顏色？"},
+  {"word":"外","clueWordFull":"外面","clueSentenceFull":"窗戶外面正在下著大雨。"},
+  {"word":"真","clueWordFull":"真正","clueSentenceFull":"這才是真正的友誼。"},
+  {"word":"各","clueWordFull":"各個","clueSentenceFull":"各個國家的風俗都不同。"},
+  {"word":"山","clueWordFull":"山脈","clueSentenceFull":"台灣有許多高大的山脈。"},
+  {"word":"題","clueWordFull":"題目","clueSentenceFull":"這道題目很有挑戰性。"},
+  {"word":"表","clueWordFull":"表演","clueSentenceFull":"今晚有一場精彩的表演。"},
+  {"word":"請","clueWordFull":"請假","clueSentenceFull":"他因為感冒向老師請假。"},
+  {"word":"課","clueWordFull":"課本","clueSentenceFull":"請把國語課本打開。"},
+  {"word":"月","clueWordFull":"月亮","clueSentenceFull":"晚上的月亮圓圓的。"},
+  {"word":"呢","clueWordFull":"在哪裡呢","clueSentenceFull":"我的筆在哪裡呢？"},
+  {"word":"第","clueWordFull":"第一","clueSentenceFull":"他是全班第一名。"},
+  {"word":"位","clueWordFull":"座位","clueSentenceFull":"請回你的座位坐好。"},
+  {"word":"定","clueWordFull":"決定","clueSentenceFull":"我決定要好好學鋼琴。"},
+  {"word":"比","clueWordFull":"比賽","clueSentenceFull":"大隊接力比賽非常刺激。"},
+  {"word":"與","clueWordFull":"參與","clueSentenceFull":"每個人都要積極參與討論。"},
+  {"word":"字","clueWordFull":"字典","clueSentenceFull":"遇到不懂的字要查字典。"},
+  {"word":"身","clueWordFull":"身體","clueSentenceFull":"健康是身體最重要的財富。"},
+  {"word":"相","clueWordFull":"相信","clueSentenceFull":"我相信你一定可以做到。"},
+  {"word":"間","clueWordFull":"房間","clueSentenceFull":"我的房間整理得很乾淨。"},
+  {"word":"手","clueWordFull":"手指","clueSentenceFull":"寫字時手指不要抓太緊。"},
+  {"word":"王","clueWordFull":"國王","clueSentenceFull":"童話故事裡有一個國王。"},
+  {"word":"主","clueWordFull":"主意","clueSentenceFull":"這是一個很棒的主意。"},
+  {"word":"西","clueWordFull":"西方","clueSentenceFull":"太陽從西方落下。"},
+  {"word":"電","clueWordFull":"電腦","clueSentenceFull":"我們在電腦教室上課。"},
+  {"word":"五","clueWordFull":"五月","clueSentenceFull":"五月是母親節的月份。"},
+  {"word":"話","clueWordFull":"說話","clueSentenceFull":"上課不可以隨便說話。"},
+  {"word":"見","clueWordFull":"見面","clueSentenceFull":"好久不見，你過得好嗎？"},
+  {"word":"才","clueWordFull":"剛才","clueSentenceFull":"剛才發生了一件趣事。"},
+  {"word":"使","clueWordFull":"使用","clueSentenceFull":"請正確使用實驗器材。"},
+  {"word":"名","clueWordFull":"名字","clueSentenceFull":"每個人都有自己的名字。"},
+  {"word":"走","clueWordFull":"走路","clueSentenceFull":"走路要看路，不要滑手機。"},
+  {"word":"打","clueWordFull":"打球","clueSentenceFull":"下課時大家都去操場打球。"},
+  {"word":"聲","clueWordFull":"聲音","clueSentenceFull":"遠處傳來優美的琴聲。"},
+  {"word":"邊","clueWordFull":"旁邊","clueSentenceFull":"學校旁邊有一間書店。"},
+  {"word":"將","clueWordFull":"將來","clueSentenceFull":"將來我想成為一名飛行員。"},
+  {"word":"海","clueWordFull":"海洋","clueSentenceFull":"海洋裡有許多奇妙的生物。"},
+  {"word":"給","clueWordFull":"送給","clueSentenceFull":"我要把這張卡片送給媽媽。"},
+  {"word":"白","clueWordFull":"白天","clueSentenceFull":"白天的校園非常熱鬧。"},
+  {"word":"正","clueWordFull":"正確","clueSentenceFull":"請用正確的姿勢寫字。"},
+  {"word":"幾","clueWordFull":"幾個","clueSentenceFull":"你家裡有幾個兄弟姊妹？"},
+  {"word":"愛","clueWordFull":"愛護","clueSentenceFull":"我們要愛護校園的花草。"},
+  {"word":"音","clueWordFull":"音樂","clueSentenceFull":"我喜歡聽輕快的音樂。"},
+  {"word":"並","clueWordFull":"並且","clueSentenceFull":"他很聰明，並且很勤勞。"},
+  {"word":"加","clueWordFull":"加油","clueSentenceFull":"比賽時大家都在場邊加油。"},
+  {"word":"怎","clueWordFull":"怎麼","clueSentenceFull":"這道題目要怎麼算？"},
+  {"word":"少","clueWordFull":"多少","clueSentenceFull":"這本字典要多少錢？"},
+  {"word":"新","clueWordFull":"新衣服","clueSentenceFull":"過年的時候要穿新衣服。"},
+  {"word":"吃","clueWordFull":"吃飯","clueSentenceFull":"飯前要記得洗手。"},
+  {"word":"習","clueWordFull":"習慣","clueSentenceFull":"早睡早起是個好習慣。"},
+  {"word":"她","clueWordFull":"她的","clueSentenceFull":"這是她最喜歡的小木偶。"},
+  {"word":"變","clueWordFull":"變化","clueSentenceFull":"大自然的變化真奧妙。"},
+  {"word":"被","clueWordFull":"被子","clueSentenceFull":"天氣冷了要記得蓋被子。"},
+  {"word":"光","clueWordFull":"光芒","clueSentenceFull":"星光閃閃發出微弱的光芒。"},
+  {"word":"情","clueWordFull":"事情","clueSentenceFull":"今天有很多事情要處理。"},
+  {"word":"重","clueWordFull":"重要","clueSentenceFull":"健康是人生最重要的事。"},
+  {"word":"或","clueWordFull":"或者","clueSentenceFull":"你可以選擇跑步或者打球。"},
+  {"word":"由","clueWordFull":"由於","clueSentenceFull":"由於下雨，比賽延期了。"},
+  {"word":"記","clueWordFull":"忘記","clueSentenceFull":"出門時不要忘記帶鑰匙。"},
+  {"word":"謝","clueWordFull":"謝謝","clueSentenceFull":"謝謝老師的辛苦教導。"},
+  {"word":"爸","clueWordFull":"爸爸","clueSentenceFull":"爸爸教我練習騎腳踏車。"},
+  {"word":"民","clueWordFull":"國民","clueSentenceFull":"每個國民都要遵紀守法。"},
+  {"word":"親","clueWordFull":"親愛","clueSentenceFull":"親愛的家人是我最好的支柱。"},
+  {"word":"聽","clueWordFull":"聽講","clueSentenceFull":"上課要專心聽講。"},
+  {"word":"全","clueWordFull":"全球","clueSentenceFull":"保護環境是全球的責任。"},
+  {"word":"化","clueWordFull":"變化","clueSentenceFull":"這裡的風景隨四季變化。"},
+  {"word":"空","clueWordFull":"天空","clueSentenceFull":"藍藍的天空飄著幾朵白雲。"},
+  {"word":"向","clueWordFull":"方向","clueSentenceFull":"迷路時要先確認方向。"},
+  {"word":"其","clueWordFull":"其中","clueSentenceFull":"這是我其中的一個夢想。"},
+  {"word":"嗎","clueWordFull":"好嗎","clueSentenceFull":"我們明天一起去玩好嗎？"},
+  {"word":"實","clueWordFull":"誠實","clueSentenceFull":"誠實是待人處事的根本。"},
+  {"word":"每","clueWordFull":"每當","clueSentenceFull":"每當放假，我們都會去郊遊。"},
+  {"word":"風","clueWordFull":"風景","clueSentenceFull":"這座山的風景非常優美。"},
+  {"word":"望","clueWordFull":"希望","clueSentenceFull":"我希望將來能環遊世界。"},
+  {"word":"別","clueWordFull":"別人","clueSentenceFull":"我們要多為別人著想。"},
+  {"word":"原","clueWordFull":"原諒","clueSentenceFull":"請原諒我無心的過錯。"},
+  {"word":"畫","clueWordFull":"畫畫","clueSentenceFull":"妹妹最喜歡在紙上畫畫。"},
+  {"word":"星","clueWordFull":"星星","clueSentenceFull":"夜晚的星星閃爍不停。"},
+  {"word":"候","clueWordFull":"時候","clueSentenceFull":"我小的時候住在農村。"},
+  {"word":"次","clueWordFull":"次數","clueSentenceFull":"練習的次數越多越熟練。"},
+  {"word":"口","clueWordFull":"口渴","clueSentenceFull":"運動後會覺得口渴。"},
+  {"word":"先","clueWordFull":"先生","clueSentenceFull":"王先生是我的鄰居。"},
+  {"word":"答","clueWordFull":"答案","clueSentenceFull":"這道題目我算不出答案。"},
+  {"word":"度","clueWordFull":"溫度","clueSentenceFull":"冬天的溫度變變得很低。"},
+  {"word":"哪","clueWordFull":"哪裡","clueSentenceFull":"請問洗手間在哪裡？"},
+  {"word":"東","clueWordFull":"東西","clueSentenceFull":"不要亂吃來路不明的東西。"},
+  {"word":"平","clueWordFull":"平安","clueSentenceFull":"祝你一路平安。"},
+  {"word":"它","clueWordFull":"它是","clueSentenceFull":"它是我的寵物小狗。"},
+  {"word":"無","clueWordFull":"無聊","clueSentenceFull":"下雨天待在家裡很無聊。"},
+  {"word":"工","clueWordFull":"工作","clueSentenceFull":"每個人都有自己的工作。"},
+  {"word":"石","clueWordFull":"石頭","clueSentenceFull":"小溪邊有很多圓圓的石頭。"},
+  {"word":"合","clueWordFull":"合作","clueSentenceFull":"大家分工合作完成任務。"},
+  {"word":"此","clueWordFull":"此刻","clueSentenceFull":"此刻我感到無比快樂。"},
+  {"word":"及","clueWordFull":"不及","clueSentenceFull":"他趕不及參加最後一場比賽。"},
+  {"word":"元","clueWordFull":"多元","clueSentenceFull":"社會上有許多多元的文化。"},
+  {"word":"已","clueWordFull":"已經","clueSentenceFull":"我已經長大變懂事了。"},
+  {"word":"母","clueWordFull":"母親","clueSentenceFull":"母親節快到了。"},
+  {"word":"特","clueWordFull":"特別","clueSentenceFull":"今天是一個特別的日子。"},
+  {"word":"六","clueWordFull":"六月","clueSentenceFull":"六月是畢業的季節。"},
+  {"word":"己","clueWordFull":"自己","clueSentenceFull":"自己的功課要自己完成。"},
+  {"word":"女","clueWordFull":"女兒","clueSentenceFull":"她是李家的大女兒。"},
+  {"word":"球","clueWordFull":"棒球","clueSentenceFull":"台灣人非常熱愛棒球。"},
+  {"word":"馬","clueWordFull":"馬上","clueSentenceFull":"聽到門鈴聲，我馬上開門。"},
+  {"word":"讓","clueWordFull":"讓位","clueSentenceFull":"我們應該禮讓座位給長輩。"},
+  {"word":"安","clueWordFull":"安全","clueSentenceFull":"過馬路要注意安全。"},
+  {"word":"帶","clueWordFull":"帶領","clueSentenceFull":"老師帶領我們去參觀。"},
+  {"word":"感","clueWordFull":"感動","clueSentenceFull":"這部電影讓人非常感動。"},
+  {"word":"圖","clueWordFull":"圖畫","clueSentenceFull":"我畫了一幅彩色的圖畫。"},
+  {"word":"龍","clueWordFull":"龍舟","clueSentenceFull":"端午節會舉辦划龍舟比賽。"},
+  {"word":"書","clueWordFull":"圖書館","clueSentenceFull":"圖書館有很多好書。"},
+  {"word":"叫","clueWordFull":"大叫","clueSentenceFull":"看到老鼠，妹妹嚇得大叫。"},
+  {"word":"樹","clueWordFull":"大樹","clueSentenceFull":"大樹下是乘涼的好地方。"},
+  {"word":"友","clueWordFull":"友誼","clueSentenceFull":"我們要珍惜彼此的友誼。"},
+  {"word":"類","clueWordFull":"種類","clueSentenceFull":"植物的種類非常繁多。"},
+  {"word":"理","clueWordFull":"理想","clueSentenceFull":"每個人都有自己的理想。"},
+  {"word":"您","clueWordFull":"您好","clueSentenceFull":"老師，您好。"},
+  {"word":"路","clueWordFull":"馬路","clueSentenceFull":"馬路上有很多車子。"},
+  {"word":"放","clueWordFull":"放學","clueSentenceFull":"放學後我們一起回家。"},
+  {"word":"覺","clueWordFull":"覺得","clueSentenceFull":"我覺得今天有點累。"},
+  {"word":"代","clueWordFull":"代表","clueSentenceFull":"他被選為班上的代表。"},
+  {"word":"內","clueWordFull":"室內","clueSentenceFull":"雨天我們在室內上體育課。"},
+  {"word":"應","clueWordFull":"應該","clueSentenceFull":"每個人都應該準時到校。"},
+  {"word":"張","clueWordFull":"一張","clueSentenceFull":"我有一張漂亮的卡片。"},
+  {"word":"住","clueWordFull":"住宅","clueSentenceFull":"這裡是一片安靜的住宅區。"},
+  {"word":"量","clueWordFull":"力量","clueSentenceFull":"小螞蟻有很大的力量。"},
+  {"word":"立","clueWordFull":"立刻","clueSentenceFull":"接到通知後，他立刻出發。"},
+  {"word":"更","clueWordFull":"更加","clueSentenceFull":"以後我要更加認真學習。"},
+  {"word":"許","clueWordFull":"許願","clueSentenceFull":"生日那天我許了一個願望。"},
+  {"word":"喜","clueWordFull":"喜歡","clueSentenceFull":"我最喜歡吃蘋果。"},
+  {"word":"關","clueWordFull":"關心","clueSentenceFull":"我們要多多關心家人。"},
+  {"word":"機","clueWordFull":"機會","clueSentenceFull":"每個人都有成功的機會。"},
+  {"word":"歡","clueWordFull":"歡迎","clueSentenceFull":"歡迎大家來我們班參觀。"},
+  {"word":"便","clueWordFull":"便宜","clueSentenceFull":"這本書很便宜。"}
+];
+
+const STORAGE_PREFIX = "progress_";
+let exam = null;
+
+function getStudentLearned(name) {
+  if(!name) return [];
+  return JSON.parse(localStorage.getItem(STORAGE_PREFIX + name) || "[]");
+}
+
+function updateUIByStudent() {
+  const name = document.getElementById("studentName").value.trim();
+  const section = document.getElementById("progressSection");
+  if(name) {
+    const learned = getStudentLearned(name);
+    section.style.display = "block";
+    document.getElementById("displayName").textContent = name;
+    document.getElementById("progressText").textContent = `${learned.length} / 2500`;
+    document.getElementById("progressBar").style.width = `${(learned.length / 2500) * 100}%`;
+  } else {
+    section.style.display = "none";
+  }
+}
+
+function speak(text) {
+  if (!window.speechSynthesis) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'zh-TW';
+  u.rate = 0.8;
+  window.speechSynthesis.speak(u);
+}
+
+function startExam() {
+  const name = document.getElementById("studentName").value.trim();
+  const count = parseInt(document.getElementById("countSel").value);
+  if(!name) { alert("請輸入學生姓名"); return; }
+
+  speak(" "); // 解鎖
+  
+  const learned = new Set(getStudentLearned(name));
+  let pool = BANK.filter(it => !learned.has(it.word));
+  
+  if (pool.length === 0) {
+    alert("目前題庫中的字，此學生已全部練習完成！");
+    return;
+  }
+
+  const actualCount = Math.min(pool.length, count);
+  if (pool.length < count) {
+    alert(`剩餘未練習字數僅剩 ${pool.length} 字。`);
+  }
+
+  exam = {
+    name: name,
+    items: pool.sort(() => Math.random() - 0.5).slice(0, actualCount),
+    idx: 0
+  };
+
+  document.getElementById("setupCard").style.display = "none";
+  document.getElementById("examArea").style.display = "block";
+  showQuestion();
+}
+
+function showQuestion() {
+  const it = exam.items[exam.idx];
+  document.getElementById("qIndex").textContent = exam.idx + 1;
+  document.getElementById("qTotal").textContent = exam.items.length;
+  document.getElementById("clueWord").textContent = it.clueWordFull.replace(it.word, "（ ）");
+  document.getElementById("clueSentence").textContent = it.clueSentenceFull.replace(it.word, "＿＿＿");
+  clearCanvas();
+}
+
+function speakCurrentWord() {
+  if (exam) {
+    const it = exam.items[exam.idx];
+    speak(`${it.word}。${it.clueWordFull}的${it.word}`);
+  }
+}
+
+function speakCurrentSentence() {
+  if (exam) speak(exam.items[exam.idx].clueSentenceFull);
+}
+
+// Canvas
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+let drawing = false, last = null;
+
+function getPos(e) {
+  const r = canvas.getBoundingClientRect();
+  const p = (e.touches && e.touches[0]) ? e.touches[0] : e;
+  return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+}
+canvas.addEventListener("touchstart", (e) => { drawing = true; last = getPos(e); e.preventDefault(); }, {passive:false});
+canvas.addEventListener("touchmove", (e) => {
+  if (!drawing) return;
+  const pos = getPos(e);
+  ctx.lineWidth = 12; ctx.lineCap = "round"; ctx.strokeStyle = "#333";
+  ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(pos.x, pos.y); ctx.stroke();
+  last = pos; e.preventDefault();
+}, {passive:false});
+canvas.addEventListener("touchend", () => drawing = false);
+
+function clearCanvas() {
+  ctx.clearRect(0,0,500,500);
+  ctx.strokeStyle = "#eee"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(250,0); ctx.lineTo(250,500); ctx.moveTo(0,250); ctx.lineTo(500,250); ctx.stroke();
+}
+
+document.getElementById("startBtn").addEventListener("click", startExam);
+document.getElementById("btnRepeatWord").addEventListener("click", speakCurrentWord);
+document.getElementById("btnRepeatSentence").addEventListener("click", speakCurrentSentence);
+document.getElementById("submitBtn").addEventListener("click", () => {
+  const currentWord = exam.items[exam.idx].word;
+  const learned = getStudentLearned(exam.name);
+  if (!learned.includes(currentWord)) {
+    learned.push(currentWord);
+    localStorage.setItem(STORAGE_PREFIX + exam.name, JSON.stringify(learned));
+  }
+
+  if (exam.idx < exam.items.length - 1) {
+    exam.idx++;
+    showQuestion();
+  } else {
+    alert(`${exam.name} 已完成本次測驗！進度已更新。`);
+    location.reload();
+  }
+});
+
+clearCanvas();
+</script>
+</body>
+</html>
