@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>國字書寫檢測（字頻1–2500版）</title>
+<style>
+  body{font-family:system-ui,-apple-system,"Noto Sans TC",sans-serif; margin:16px; line-height:1.5}
+  .row{display:flex; flex-wrap:wrap; gap:12px; align-items:center}
+  select,button,input{font-size:16px; padding:8px 10px}
+  button{cursor:pointer}
+  .card{border:1px solid #ddd; border-radius:12px; padding:14px; margin-top:12px}
+  .big{font-size:26px; font-weight:700}
+  .muted{color:#666}
+  #canvas{border:1px solid #333; touch-action:none; border-radius:10px; background:#fff}
+  .grid{display:grid; grid-template-columns:1fr; gap:12px}
+  @media(min-width:900px){.grid{grid-template-columns: 1fr 1fr}}
+  .ok{color:#0a7} .bad{color:#c33}
+  .pill{display:inline-block; padding:2px 10px; border:1px solid #ddd; border-radius:999px; font-size:12px; margin-left:6px}
+  .hr{border-top:1px dashed #ddd; margin:10px 0}
+  .warn{background:#fff7e6; border:1px solid #ffd59a; padding:10px 12px; border-radius:10px}
+</style>
+</head>
+<body>
+<h2>國字書寫檢測（學生版）<span class="pill">出題字庫限制：字頻 1–2500</span></h2>
+
+<div class="warn">
+  這個版本會把「可出題的字」限制在你提供的《教育部字庫(1–5021)》中 <b>字頻 1–2500</b> 範圍。<br/>
+  學生看不到答案，只看到「語詞線索」與「造句線索（挖空）」。
+</div>
+
+<div class="card">
+  <div class="row">
+    <label>姓名：<input id="studentName" placeholder="請輸入姓名" style="width:180px"/></label>
+    <label>年級：
+      <select id="gradeSel">
+        <option value="G1">一年級</option>
+        <option value="G2">二年級</option>
+        <option value="G3">三年級</option>
+        <option value="G4">四年級</option>
+        <option value="G5">五年級</option>
+        <option value="G6">六年級</option>
+        <option value="ALL">全部混合</option>
+      </select>
+    </label>
+    <label>題數：
+      <select id="countSel">
+        <option>20</option><option>15</option><option>10</option>
+      </select>
+    </label>
+    <button id="startBtn">開始測驗</button>
+    <button id="clearBtn" title="清除本機紀錄">清除本機紀錄</button>
+  </div>
+  <div class="muted" id="statusLine" style="margin-top:8px;">尚未開始</div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div>
+        <div class="muted">題目 <span id="qIndex">0</span>/<span id="qTotal">0</span></div>
+        <div class="big" id="clueWord"></div>
+      </div>
+      <div class="row">
+        <button id="speakBtn" title="唸出語詞線索（完整）">🔊 念語詞線索</button>
+<button id="speakTargetBtn" title="唸出題目字">🔊 念題目字</button>
+<button id="speakSentenceBtn" title="唸造句線索（挖空）">🗣 念造句線索</button>
+        <button id="resetCanvasBtn">重寫</button>
+      </div>
+    </div>
+    <div class="hr"></div>
+    <div class="muted">造句線索（已挖空）：</div>
+    <div id="clueSentence" style="font-size:18px; margin-top:6px;"></div>
+
+    <div class="hr"></div>
+    <div class="muted">請在下方空白處寫出你認為的那個字：</div>
+    <div style="margin-top:8px;">
+      <canvas id="canvas" width="520" height="520"></canvas>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <button id="submitBtn">送出</button>
+      <div id="feedback" class="muted"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div>
+        <div class="big">老師回饋資料（本機）</div>
+        <div class="muted">可下載 CSV 交給老師整理</div>
+      </div>
+      <button id="downloadBtn">下載 CSV</button>
+    </div>
+    <div class="hr"></div>
+    <div id="teacherBox" class="muted">尚無紀錄</div>
+  </div>
+</div>
+
+<script>
+
+function speakText(text, rate=1){
+  if(!('speechSynthesis' in window)){ alert('此裝置不支援語音'); return; }
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'zh-TW';
+  u.rate = rate;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(u);
+}
+
+
+/** 出題範圍限制：字頻 1–2500（依你上傳的教育部字庫 PDF） */
+const ALLOWED_FREQ_1_2500 = new Set("的一是了不我有在人來大上這到們個小你子他以好為就生要說中天和時可麼看會地家下出學著國得也用多成年裡過去能後長都分很老動起物公水什心把面作方那十想樣自所然如三發事對沒還同高道師氣種而回二開於頭現做文媽體些最寫又因前從法明行問意花日形知四快之常經教活太兩果本兒點當美校進等但樂部再數像只力色外真各山題表請課月呢第位定比與字身相間手王主西電五話見才使名走打聲邊將海給白正幾愛音並加怎少新吃習她變被光情重或由記謝爸民親聽全化空向其嗎實每風望別原畫星候次口先答度哪東平它無工石合此及元已母特六己女球馬讓安帶感圖龍書叫樹友類理您路放覺代內應張住量立更許喜關機歡便完世解造利流處算期臺弟車入北業眼例找百直照朋式節接目讀指神飛非希七條吧陽食南八結門展連今河通容觀玩興句傳認隻詞性卻木近萬金選清火信填孩者父魚受號亮收林熱品班斯牠稱肉腦難念線思片語故市角網場提草啊遠九跟麗區笑術影滿達且建辦早園管往注除黃死示段科保器服紅留曲何味單界站命包告產導交練拿土該拉運義古共歌育奇計灣布祝列鳥功求城寶報約改深較爾象福幫格葉細設任始晚哈苦春識久步千強溫跑落至輕積則雨參根整巴統轉里總首錢具哥精試雖考離士言底華夫阿藝演呀件青送組皮半夜級遊舉反腳刻筆童怕骨縣程忙室蟲克跳台鄉論娘族誰假怪植環料黑響裝牛英禮紀唱資倒排越朝備船坐病鐵視史妹板紙詩狀農趕啦錯房夠戲養亞員李畢斷型雄衣消奶左恐塊座尺終燈緊團層油院察助準決伯周失易依妳吸政停訴羅必婆綠右令景雲買軍似護引驗甲掉剛圓取查基調隨害境野康息竹群戰置狗極推漸居德絲足冷館即傷製臉集社卡歲舞賽香琴慢牙曾沙穿睡需般蘭歷質切爺洲孔突源震靜充錄午講系急藏速升持討短客迷順米另低帝呼富貴續存態驚洋務健費玉背維姊盡廣仙創據究彩優辛喔裏供永田官待男修雙陳測標鼓毛案飯針旅含竟領顆研屬材拜適善枝增頁眾睛岩密醫趣姑附劇盤治乾項確村武波救省專顧印摩寒藍雞屋嘴未模技鼠血休射喝陸鐘配湖兵倍議貝旁洞雪賞素忘簡端孫圍敬搖貓隊菜藥顯朵商獲皇迎露仍幸鏡哇絕支制良銀壞宮忽夏復止投探冬爬奏係博乙守局乎液構際須範頂殺獨初透漢鬼蛋燒哭兔若破差顏織尾規壁築吹酒痛防勞珍愈換漂岸昨倫遇江微幼郎榮歐聯懷願互羊游派梅蓋壓警丁粉擔免偷豐偉繼季施亂袋窗斤份努島減魔巨仔負追險劉衛靠輪靈楚叔齒洗敢甚桃陣章散樓拍府符介庭祖伸按鬧刀否灰森揮彈秋尋編營堅移談擊賣暖爭紛盛替餐志虎桌夢耳尼堡殼杯堂圈吉店乘值烈異聖暗獎嚴鎮麻兄猴忍毒悄秦採床茶滑聞齊哦雅箱堆熟沉價操姐典序肯俗閃票頓奮壯唐醒佛豆幹豬偶蛇勢括紹餘徵巧某釋欣勇率寬暴妙災索責納瓶預儀懂臨橫伴珠冰降鮮雜智雕濟泥嚇彎泡軟勝距架激抱秀況抓婚超刺描惡尤戶吳逃氧困述浪威染街篇縮聰隔銅州封致貼箭橋危孝限溪鞋姓烏牆猜淡敵固掃逐勤棒載悟效普姆既掛盒惜硬播慶宜妻獵舊后司缺淚證蓮蘇享財尊躲滴翻寄遍繁捕登煩瓜弄抽淨窮鋼乳厚膠權讚傑髮覽均剪禁汽肥雷狼僅摸鼻糖默婦鹿池胡剩聊避折冒套付繩宇革楊舒協招敗蒙億廳獅肌攻訊退徒幣佳版核粗腿喊補辨繞域滾獻昆洛咪弱陰莉溶滅阻訪湯磁遺宗冠紋隆潔郵尚粒斜裂沿誠碼慧擺側借掌奧稻丹松抬揚潮犯呈挑胞貨脫嘛鈴藉末君衝魯鵝尖束恩胸貌臟觸仁垂娃殊概閱肚祥閒蒸璃擦丟柱啟棉誕濃鹽爛憶甘悲莊蒂玻龜檢卵芬徑益煙階緣歸宙股捉旋鳳複鄰糕勵燃亡臣谷律陶莫膀疑聚績繪飄昏涼累途混港瑪鋒融隱週酸砍巢萊坡浮輸址柔搬餓蝶獸汗曹毫棵嗯戴鷹碎籃延抗恭插塔鴨仿判翅愉晨蛙慈耕筋漁燕騎芳偏訓敘陪暑墨燭臂匹佩迪秒評塑輔磨螺職珊誤奔拔析朗梯遭鬆蘿○奉屆霧宋捨碰瞧炮礦凡託略握闊副脈嘉廠衡川央丈彼鬥雀熊廟趙承扇嘆憐噴囉穴氏托佈埋柴徐壺番罪炎虛蔔賴謎挖麥塞椅縫擠穫哲飽曉頸蟻吐妮攝莖蜜晶紫飾猩廢橡邀黏帽孟曆庫零寧芽叢覆京耐腹夕擇胃筒軸漫惠鑽瓦恆祭跡蟹灌妖咬甜搭矮棲策慌監羽忠諸耶猛損殖埃膚擁井哺蜂舅懶墓鉛劍蕭翠沖貧嫁綱蔡賓撞爵麵耀吵幽翁貫敲緩壤騙腸侍貢疏詳柳伙叮呵委牧航勒幅牌欄占寺伊刷訂侵捲傻賢呆舍晴搶翔瑞菌劃幕撒蠟籠斗蚊閉遲胎蘋丙朱唉倆迴旗罵鳴諾騰怒授慮遷餅障辭促幻吞私郊汁循奪輩蝦扁偵廚縱斑渡塵棄飲疊冊俊姿哩榕槍勸鞭仰拖振羞塗綿壽憑躺雌翼額爆杜咦恨荊慣輝簿躍殘伏竿泉席巡煤溼蘆匠拼肺骼洪釘凱厲恥薄舌夾肩枯帥稀柏殿晃渾培嘿荷擴傘傲狐娥峽敝喻躍于汙刊姜宣屏淺崇潑煮賀豪踏絡譜蹟艾乃孤虹詹嘗映喲悶泳荒腰鄭蹤爐競勉澳拾髒笨腔稍碳嘻撲澤屍牽亦咚乖侯貞媒譯勁恰皆臭棋敏焦搜款盜嗨黎儘橘穩牢患抵喪桶郭胖嗚敦罰漿擾灘齡伍丘扮扶淑詢粽嫦漆撿黨譽爪呂眉茂恢狸凍純疾瓷稚蒼韓頻屁坦疼脖笛蝕穀凝澆蝴錦藤旦峰悅陷梨瑟厭腐撥慕療遵膽串拇泊捐娜械棚碗駛螞礎籍鬍申屈廷岳盆羿桂割韻欲愚軻溜傾琳徹董輛糟喂予摘狂范盼役翰蕉鍵襲礙宏箏狠添喬蜥苗瘦踢懸匆伐批夥祈茄秘帳采潛嶼簧鍋繡贊慰憲邦駕哀謂梁窩漠醉膜犬抹桿趁帆弗圾垃炸泌祕啄惱瞪滔碧誌闆猶糧脊唯爽控訝辯慘銳劑謙鴉鱷召干弓盈疲執蛛筷諒芒尿牲茲莎愁跨歉睜賺龐罐仇巫戒返姨臥眠曼購悉欺鉤澎痕蹈薩撐巾划奴玲迫茫堪塘溝裁頑暢哎赫遮糊銘魏吊凸咐肢宴唷爹猿綁蒐暫颱澱馨斧抖怡赤逢悠跌湧螢跪踐盧璧嘩鎖蠶繫旨凶佔逆拓怨柯挺佑寂淋逛菲截誇轟瑜墳櫃籌獄鯊顎耍砂悔喃纏婿憂艱鍊賜顱兇宅押泛挨酷兼豎莓審萄嘰賊鴿孵儲羨惰督葡葛婷玄札扯帕貪豚棧註腺邁灑叉企叭卷卓玫烤匙鋪盪措渴嫩株廉乏舟汪吩韋紂遜宵釣喚蜘哼擬醜驕藻囊昌畜泣軌芭邱妨傍閔椎瑰擅遞寵憤嬰謀嚷罷驅鑿掰扣仗征宿牡昭浩泰枚滋漲漏噹嬌魂瞭褐遼霜嶺隙闖藺枕忌浴紗裙砝傢慎綜絃碌摔榜潤遣濫簽驟臘纖歹趴豹娶飢陵掘瘋禍皺燥燦贏扔怖胚涉紐晏崖捷禱壹豔瑚潭頗稿嬸艘鑑鱗寓綺匈岡吱弧辰彷氛沸歪巷姪樸袁螃晒犧喇綻廖墊銷鄧准啼揭乞亨拋芝陌偕脆梳宰症騫淘蘊捧嫌飼裕踩墾鍾謹涵搞妥昇沼俠彥耘唸秤廊喉愧閣蔗貳賭僕蔬禽濕熄薪誼鑄溉熔馳撫蔣嫂仲彿奈併披吼蜴亭擋衰螂慨窯覓噢葬禧兢虧浸署嘍紡梭譬軀拆吻畏炒趟挫劈卿緻逝聳掩鋸援儡罩礫媚閎葫栽傀攜轎刑叩昂咒嘲拒蝸眨磚惑瀑毯薇緒餵撈鹼晉滲撕盾絮懼霸瓣鑼污迅脾診皂煉郁舜柄棟凌雯彗鈔吟鼎津喘脹冶勃碑澄儒緯毅薯贈蕩蹄濱鶯澡饒嚼驢劣屯卑娟坊桑售秧哄凋啪廁崩掠棍糞焰蕊嗡嚕蛾鯨頌蠻誓攀謠鷺摺懈擲暈寞劭孕丐抄沃肖賈邪靖框違唔駐躬噪袖蕾蜓蹲窄戚塌赴辱鵑菇欠凹寸杉毀嗅沾肆洽彰租瑩剖".split(""));
+
+const BANK = {"G1": [{"word": "大", "clueWordFull": "大人", "clueSentenceFull": "大人會提醒我們注意安全。", "note": "一撇一捺開展，橫畫別太長。"}, {"word": "小", "clueWordFull": "小心", "clueSentenceFull": "走樓梯要小心，不要推擠。", "note": "三點位置分開，不要擠成一團。"}, {"word": "上", "clueWordFull": "上面", "clueSentenceFull": "上面那一行要寫整齊。", "note": "橫畫平，豎要直。"}, {"word": "下", "clueWordFull": "下面", "clueSentenceFull": "下面這一格請你寫名字。", "note": "豎畫直，末筆收乾淨。"}, {"word": "中", "clueWordFull": "中間", "clueSentenceFull": "中間那條線要畫直。", "note": "外框方正，中豎置中。"}, {"word": "天", "clueWordFull": "天空", "clueSentenceFull": "天空變暗時可能要下雨。", "note": "上橫平，撇捺角度清楚。"}, {"word": "女", "clueWordFull": "女生", "clueSentenceFull": "女生和男生都要互相尊重。", "note": "三筆分明，收筆不散。"}, {"word": "子", "clueWordFull": "孩子", "clueSentenceFull": "孩子要學會自己整理書包。", "note": "橫畫平，彎鉤穩。"}, {"word": "家", "clueWordFull": "家人", "clueSentenceFull": "家人一起吃飯很溫暖。", "note": "宀不壓，下面要留空。"}, {"word": "學", "clueWordFull": "學校", "clueSentenceFull": "學校裡要遵守秩序。", "note": "上部別擠，下部要穩。"}], "G2": [{"word": "友", "clueWordFull": "朋友", "clueSentenceFull": "朋友之間要互相幫忙。", "note": "撇捺開展，收筆乾淨。"}, {"word": "問", "clueWordFull": "問題", "clueSentenceFull": "問題看懂後再回答。", "note": "門框等距，口置中。"}, {"word": "真", "clueWordFull": "真的", "clueSentenceFull": "我真的很想把字寫好。", "note": "上部不散，下部橫畫要平。"}, {"word": "定", "clueWordFull": "一定", "clueSentenceFull": "我一定會準時交作業。", "note": "宀穩，下部不歪。"}, {"word": "先", "clueWordFull": "先後", "clueSentenceFull": "做事要分清先後順序。", "note": "上部短，下部長，重心穩。"}, {"word": "再", "clueWordFull": "再來", "clueSentenceFull": "再來請你把筆放回筆袋。", "note": "橫畫等距，最後一筆收好。"}, {"word": "多", "clueWordFull": "多少", "clueSentenceFull": "你想要多少張貼紙？", "note": "上部不擠，下部撇捺開。"}, {"word": "少", "clueWordFull": "多少", "clueSentenceFull": "今天作業不多也不少。", "note": "小點分開，撇要有角度。"}, {"word": "好", "clueWordFull": "好好", "clueSentenceFull": "請你把字好好寫完。", "note": "女旁靠左，子旁不壓。"}, {"word": "新", "clueWordFull": "新聞", "clueSentenceFull": "新聞提醒大家注意天氣。", "note": "左部直，右部斤要挺。"}], "G3": [{"word": "理", "clueWordFull": "理由", "clueSentenceFull": "說明時要講出理由。", "note": "王旁直，里部方正。"}, {"word": "由", "clueWordFull": "自由", "clueSentenceFull": "自由不是想做什麼就做什麼。", "note": "中線直，內部留白。"}, {"word": "記", "clueWordFull": "記錄", "clueSentenceFull": "記錄要寫清楚日期。", "note": "言旁收斂，己部不歪。"}, {"word": "畫", "clueWordFull": "圖畫", "clueSentenceFull": "圖畫要先打草稿再上色。", "note": "田部方，外框不歪。"}, {"word": "象", "clueWordFull": "想像", "clueSentenceFull": "想像一下山上的風景。", "note": "上部不亂，末筆收乾淨。"}, {"word": "清", "clueWordFull": "清楚", "clueSentenceFull": "把重點寫清楚再交。", "note": "氵分開，右部留白。"}, {"word": "保", "clueWordFull": "保護", "clueSentenceFull": "保護眼睛要看遠放鬆。", "note": "亻直，呆部要穩。"}, {"word": "較", "clueWordFull": "比較", "clueSentenceFull": "比較兩個例子可以找出差異。", "note": "左右別擠，橫畫平。"}, {"word": "園", "clueWordFull": "公園", "clueSentenceFull": "公園裡有很多樹和花。", "note": "外框方，內部要置中。"}, {"word": "樣", "clueWordFull": "一樣", "clueSentenceFull": "我們的答案不一定一樣。", "note": "木旁直，右部層次清楚。"}], "G4": [{"word": "資", "clueWordFull": "資源", "clueSentenceFull": "資源有限，所以要節省使用。", "note": "次部清楚，貝部穩。"}, {"word": "源", "clueWordFull": "資源", "clueSentenceFull": "資源分配要公平。", "note": "氵分開，原部不擠。"}, {"word": "境", "clueWordFull": "環境", "clueSentenceFull": "環境整潔，心情也會更好。", "note": "土旁穩，右部留白。"}, {"word": "觀", "clueWordFull": "觀察", "clueSentenceFull": "觀察時要先找出細節。", "note": "見部穩，上部不亂。"}, {"word": "調", "clueWordFull": "調整", "clueSentenceFull": "調整座位後，大家更好討論。", "note": "言旁收斂，周部方正。"}, {"word": "解", "clueWordFull": "了解", "clueSentenceFull": "了解規則後再開始遊戲。", "note": "角部清楚，刀要直。"}, {"word": "辦", "clueWordFull": "辦法", "clueSentenceFull": "我們一起想一個辦法解決。", "note": "中豎要直，左右平衡。"}, {"word": "推", "clueWordFull": "推想", "clueSentenceFull": "推想原因時要說出依據。", "note": "扌直，隹部站穩。"}, {"word": "證", "clueWordFull": "證據", "clueSentenceFull": "證據越清楚，結論越可靠。", "note": "言旁不寬，正部直。"}, {"word": "結", "clueWordFull": "結論", "clueSentenceFull": "結論要用一句話說清楚。", "note": "糸旁收斂，口要方。"}], "G5": [{"word": "論", "clueWordFull": "討論", "clueSentenceFull": "討論時要輪流發言。", "note": "言旁收斂，侖部清楚。"}, {"word": "據", "clueWordFull": "根據", "clueSentenceFull": "根據資料，我們可以推想結果。", "note": "扌直，右部複雜留白。"}, {"word": "規", "clueWordFull": "規則", "clueSentenceFull": "規則先講清楚，才不會吵架。", "note": "見部穩，左部不歪。"}, {"word": "程", "clueWordFull": "過程", "clueSentenceFull": "過程要記下關鍵步驟。", "note": "禾旁直，呈口方正。"}, {"word": "續", "clueWordFull": "持續", "clueSentenceFull": "持續練習，字會越寫越好。", "note": "糸旁收斂，右側分層。"}, {"word": "影", "clueWordFull": "影響", "clueSentenceFull": "這個選擇會影響結果。", "note": "景部穩，彡不亂。"}, {"word": "響", "clueWordFull": "影響", "clueSentenceFull": "小小改變也會影響表現。", "note": "鄉部別亂，口方正。"}, {"word": "參", "clueWordFull": "參考", "clueSentenceFull": "參考別人的方法再改進。", "note": "上部不擠，下部分明。"}, {"word": "準", "clueWordFull": "準備", "clueSentenceFull": "準備好材料再開始實作。", "note": "隹部站穩，氵別擠。"}, {"word": "轉", "clueWordFull": "轉換", "clueSentenceFull": "轉換想法後，我懂了！", "note": "車旁穩，專部別擠。"}], "G6": [{"word": "策", "clueWordFull": "策略", "clueSentenceFull": "策略不同，結果也可能不同。", "note": "竹頭對齊，中部別亂。"}, {"word": "判", "clueWordFull": "判斷", "clueSentenceFull": "判斷時要看清楚資料。", "note": "刂旁直，左部不黏。"}, {"word": "斷", "clueWordFull": "判斷", "clueSentenceFull": "判斷完成後要說出理由。", "note": "斤部要直，左右別擠。"}, {"word": "統", "clueWordFull": "統整", "clueSentenceFull": "統整重點可以幫助記憶。", "note": "糸旁收斂，右部清楚。"}, {"word": "責", "clueWordFull": "責任", "clueSentenceFull": "責任要自己扛起來。", "note": "上部別擠，下貝穩。"}, {"word": "任", "clueWordFull": "責任", "clueSentenceFull": "責任分工後，效率更高。", "note": "亻旁直，壬部站穩。"}, {"word": "驗", "clueWordFull": "實驗", "clueSentenceFull": "實驗前要先確認安全。", "note": "馬旁別擠，右部平行。"}, {"word": "隨", "clueWordFull": "隨時", "clueSentenceFull": "遇到問題要隨時提問。", "note": "阝旁直，右部層次分明。"}, {"word": "確", "clueWordFull": "確定", "clueSentenceFull": "確定答案後再寫進格子。", "note": "石旁穩，右部不擠。"}, {"word": "簡", "clueWordFull": "簡單", "clueSentenceFull": "把想法用簡單的話說明。", "note": "竹頭對齊，間部方正。"}]};
+
+function maskAnswer(text, ans){
+  return String(text).split(ans).join("＿＿＿");
+}
+function getPool(grade){
+  let items=[];
+  if(grade==="ALL"){
+    for(const k of Object.keys(BANK)) items = items.concat(BANK[k]);
+  }else{
+    items = (BANK[grade]||[]);
+  }
+  items = items.filter(it => ALLOWED_FREQ_1_2500.has(it.word));
+  return items;
+}
+function shuffle(arr){
+  for(let i=arr.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+  return arr;
+}
+
+let exam = null;
+const LS_KEY="stroke_exam_records_v5_freq2500";
+
+function loadRecords(){
+  try{ return JSON.parse(localStorage.getItem(LS_KEY)||"[]"); }catch(e){ return []; }
+}
+function saveRecords(rows){
+  localStorage.setItem(LS_KEY, JSON.stringify(rows));
+}
+function renderTeacherBox(){
+  const rows=loadRecords();
+  const box=document.getElementById("teacherBox");
+  if(!rows.length){ box.textContent="尚無紀錄"; return; }
+  const last=rows[rows.length-1];
+  const verdict = (last.isCorrect===true) ? "正確" : (last.isCorrect===false ? "待注意" : "待判讀");
+  const cls = (last.isCorrect===true) ? "ok" : (last.isCorrect===false ? "bad" : "");
+  box.innerHTML = `
+    <div>目前共有 <b>${rows.length}</b> 筆紀錄（儲存在這台電腦/平板的瀏覽器）</div>
+    <div class="muted">最新一筆：${new Date(last.ts).toLocaleString()}｜${last.name||"（未填姓名）"}｜${last.grade}｜題目字：<b>${last.word}</b>｜判定：<b class="${cls}">${verdict}</b></div>
+    <div class="muted">建議：本版先存「筆跡圖 + 正確字」供老師人工確認；需要 AI 判定再加模組。</div>
+  `;
+}
+function downloadCSV(){
+  const rows=loadRecords();
+  if(!rows.length){ alert("目前沒有紀錄可下載"); return; }
+  const header=["ts","name","grade","word","clueWordMasked","clueSentenceMasked","isCorrect","confidence","note","pngDataUrl"];
+  const lines=[header.join(",")];
+  for(const r of rows){
+    const line = header.map(k=>{
+      let v = (r[k]??"");
+      v = String(v).replace(/\n/g," ").replace(/"/g,'""');
+      return `"${v}"`;
+    }).join(",");
+    lines.push(line);
+  }
+  const blob=new Blob([lines.join("\n")], {type:"text/csv;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download="stroke_exam_records_freq1-2500.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+function speak(text){
+  if(!("speechSynthesis" in window)){ alert("此裝置不支援語音朗讀"); return; }
+  const u=new SpeechSynthesisUtterance(text);
+  u.lang="zh-TW";
+  speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+}
+
+// Canvas
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+ctx.lineWidth=10;
+ctx.lineCap="round";
+let drawing=false;
+let last=null;
+
+function getPos(e){
+  const r=canvas.getBoundingClientRect();
+  const p = (e.touches && e.touches[0]) ? e.touches[0] : e;
+  return {x: (p.clientX - r.left) * (canvas.width / r.width),
+          y: (p.clientY - r.top) * (canvas.height / r.height)};
+}
+function startDraw(e){ drawing=true; last=getPos(e); e.preventDefault(); }
+function moveDraw(e){
+  if(!drawing) return;
+  const pos=getPos(e);
+  ctx.beginPath();
+  ctx.moveTo(last.x,last.y);
+  ctx.lineTo(pos.x,pos.y);
+  ctx.stroke();
+  last=pos;
+  e.preventDefault();
+}
+function endDraw(e){ drawing=false; last=null; e.preventDefault(); }
+function clearCanvas(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.save();
+  ctx.globalAlpha=0.18;
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.moveTo(canvas.width/2,0); ctx.lineTo(canvas.width/2,canvas.height);
+  ctx.moveTo(0,canvas.height/2); ctx.lineTo(canvas.width,canvas.height/2);
+  ctx.moveTo(0,0); ctx.lineTo(canvas.width,canvas.height);
+  ctx.moveTo(canvas.width,0); ctx.lineTo(0,canvas.height);
+  ctx.stroke();
+  ctx.restore();
+}
+clearCanvas();
+
+canvas.addEventListener("mousedown", startDraw);
+canvas.addEventListener("mousemove", moveDraw);
+canvas.addEventListener("mouseup", endDraw);
+canvas.addEventListener("mouseleave", endDraw);
+canvas.addEventListener("touchstart", startDraw, {passive:false});
+canvas.addEventListener("touchmove", moveDraw, {passive:false});
+canvas.addEventListener("touchend", endDraw, {passive:false});
+
+// Exam flow
+function showQuestion(){
+  const it=exam.items[exam.idx];
+  document.getElementById("qIndex").textContent = String(exam.idx+1);
+  document.getElementById("qTotal").textContent = String(exam.items.length);
+
+  document.getElementById("clueWord").textContent = maskAnswer(it.clueWordFull, it.word);
+  document.getElementById("clueSentence").textContent = maskAnswer(it.clueSentenceFull, it.word);
+  document.getElementById("feedback").textContent="";
+  clearCanvas();
+}
+function startExam(){
+  const name=document.getElementById("studentName").value.trim();
+  const grade=document.getElementById("gradeSel").value;
+  const count=parseInt(document.getElementById("countSel").value,10);
+
+  const pool=getPool(grade);
+  if(pool.length < count){
+    alert(`題庫不足：目前可用 ${pool.length} 題（已套用字頻1–2500限制）。\n請改成「全部混合」或降低題數。`);
+    return;
+  }
+  exam={name, grade, items: shuffle(pool.slice()).slice(0,count), idx:0, startedAt: Date.now()};
+  document.getElementById("statusLine").textContent = `進行中：${grade}｜${count}題`;
+  showQuestion();
+}
+function canvasToDataURL(){ return canvas.toDataURL("image/png"); }
+
+/** 簡化判定：本版不做 AI 字形辨識，存筆跡圖給老師看 */
+function simpleJudge(){ return {isCorrect:null, confidence:0.0}; }
+
+function submitAnswer(){
+  if(!exam) return;
+  const it=exam.items[exam.idx];
+  const png=canvasToDataURL();
+  const judge=simpleJudge();
+
+  const rows=loadRecords();
+  rows.push({
+    ts: Date.now(),
+    name: exam.name,
+    grade: exam.grade,
+    word: it.word,
+    clueWordMasked: maskAnswer(it.clueWordFull, it.word),
+    clueSentenceMasked: maskAnswer(it.clueSentenceFull, it.word),
+    isCorrect: judge.isCorrect,
+    confidence: judge.confidence,
+    note: it.note||"",
+    pngDataUrl: png
+  });
+  saveRecords(rows);
+  renderTeacherBox();
+
+  document.getElementById("feedback").textContent = "已送出（老師端可下載 CSV，並用筆跡圖判讀）";
+
+  exam.idx += 1;
+  if(exam.idx >= exam.items.length){
+    document.getElementById("statusLine").textContent = "完成！你已做完本次測驗。";
+    alert("完成！謝謝你。");
+    exam=null;
+    document.getElementById("qIndex").textContent="0";
+    document.getElementById("qTotal").textContent="0";
+    document.getElementById("clueWord").textContent="";
+    document.getElementById("clueSentence").textContent="";
+    clearCanvas();
+    return;
+  }
+  showQuestion();
+}
+
+document.getElementById("startBtn").addEventListener("click", startExam);
+document.getElementById("resetCanvasBtn").addEventListener("click", clearCanvas);
+document.getElementById("submitBtn").addEventListener("click", submitAnswer);
+document.getElementById("downloadBtn").addEventListener("click", downloadCSV);
+
+
+function speakSentenceMasked(sentenceMasked, rate=1){
+  const u=new SpeechSynthesisUtterance(sentenceMasked);
+  u.lang="zh-TW";
+  u.rate=rate;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+}
+
+function speakWord(word, rate=1){
+  const u=new SpeechSynthesisUtterance(word);
+  u.lang="zh-TW";
+  u.rate=rate;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+}
+document.getElementById("speakBtn").addEventListener("click", ()=>{
+  if(!exam) return;
+  const it = exam.items[exam.idx];
+  // 念「語詞線索」：完整語詞（含題目字），畫面仍挖空
+  speakText(it.clueWordFull, 1.0);
+});
+document.getElementById("clearBtn").addEventListener("click", ()=>{
+  if(confirm("確定清除本機紀錄？（不可復原）")){
+    localStorage.removeItem(LS_KEY);
+    renderTeacherBox();
+    alert("已清除");
+  }
+});
+
+renderTeacherBox();
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  const btn = document.getElementById('speakSentenceBtn');
+  if(btn){
+    btn.addEventListener('click', ()=>{
+      if(!exam) return;
+      const it = exam.items[exam.idx];
+      const masked = maskAnswer(it.clueSentenceFull, it.word);
+      speakText(masked, 0.95);
+    });
+  }
+});
+
+
+document.getElementById("speakTargetBtn").addEventListener("click", ()=>{
+  if(!exam) return;
+  const it = exam.items[exam.idx];
+  // 念「題目字」：只念題目字
+  speakText(it.word, 1.0);
+});
+document.getElementById("speakSentenceBtn").addEventListener("click", ()=>{
+  if(!exam) return;
+  const it = exam.items[exam.idx];
+  // 念「造句線索」：先念題目字，再念完整造句（確保挖空的字也會被唸出）
+  speakText(it.word + '。' + it.clueSentenceFull, 0.95);
+});
+</script>
+</body>
+</html>
